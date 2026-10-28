@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Resultados en Tiempo Real - ElectoEscolar</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- SheetJS CDN para exportar a Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans antialiased flex flex-col">
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-800 text-white px-5 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-slate-700 pointer-events-none">
+        <i id="toastIcon" class="fa-solid fa-circle-check text-emerald-400 text-lg"></i>
+        <span id="toastMessage" class="text-sm font-medium">Operación realizada con éxito</span>
+    </div>
+
+    <!-- Header / Navbar -->
+    <header class="bg-slate-950 shadow-2xl border-b border-slate-800 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center flex-wrap gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="bg-amber-500/20 p-2.5 rounded-xl border border-amber-500/30 text-amber-400">
+                    <i class="fa-solid fa-trophy text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                        ElectoEscolar <span class="text-xs bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded-full border border-amber-500/30">En Vivo</span>
+                    </h1>
+                    <p class="text-xs text-slate-400">Tablero de Resultados en Tiempo Real por Año y Vocería</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <div class="text-xs px-3 py-1.5 rounded-xl bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                    <span class="font-bold">Actualización Activa</span>
+                </div>
+                <a href="gestion.html" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3.5 py-2 rounded-xl transition font-semibold flex items-center gap-2">
+                    <i class="fa-solid fa-gears"></i> Volver a Gestión
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Contenido Principal -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full space-y-8">
+
+        <!-- Barra de Filtros y Botón de Descarga Excel -->
+        <div class="bg-slate-800/80 border border-slate-700/80 backdrop-blur-md rounded-2xl p-4 flex flex-col md:flex-row justify-between items-center gap-4 shadow-xl">
+            <div class="flex items-center gap-3 w-full md:w-auto">
+                <i class="fa-solid fa-filter text-amber-400"></i>
+                <label class="text-sm font-semibold text-slate-300">Filtrar Año:</label>
+                <select id="filterAno" onchange="renderDashboard()" class="bg-slate-900 border border-slate-700 rounded-xl px-4 py-2 text-sm font-bold text-slate-200 outline-none focus:ring-2 focus:ring-amber-500 flex-1 md:flex-none">
+                    <option value="TODOS">Todos los Años</option>
+                    <option value="1° Año">1° Año</option>
+                    <option value="2° Año">2° Año</option>
+                    <option value="3° Año">3° Año</option>
+                    <option value="4° Año">4° Año</option>
+                    <option value="5° Año">5° Año</option>
+                </select>
+            </div>
+
+            <div class="flex items-center gap-3 w-full md:w-auto justify-between md:justify-end flex-wrap">
+                <div id="statsBadge" class="text-xs text-slate-400 font-semibold bg-slate-900 px-4 py-2 rounded-xl border border-slate-800">
+                    Cargando métricas...
+                </div>
+                <!-- Botón de Descarga de Reporte Detallado Excel -->
+                <button onclick="descargarReporteExcel()" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-xl transition font-semibold flex items-center gap-2 shadow-lg shadow-emerald-950">
+                    <i class="fa-solid fa-file-excel text-base"></i>
+                    <span>Descargar Reporte Detallado</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Dashboard Grid Container -->
+        <div id="dashboardContainer" class="space-y-10">
+            <!-- Se llena dinámicamente -->
+        </div>
+
+    </main>
+
+    <script>
+        const SUPABASE_URL = 'https://sqcgoeljlpeypqwfcbci.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_MQSUfHsg0hgsIxlYRP2VRw_pPvFEgD_';
+        
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const ANOS = ["1° Año", "2° Año", "3° Año", "4° Año", "5° Año"];
+        const VOCERIAS = ["Vocero Integrador", "Vocero Contralor", "Vocero Activista"];
+
+        let candidates = [];
+        let votosList = [];
+        let chartInstances = {};
+
+        async function initRealtimeDashboard() {
+            await cargarDatos();
+            renderDashboard();
+            suscribirCambiosEnTiempoReal();
+        }
+
+        async function cargarDatos() {
+            try {
+                // Candidatos
+                const { data: cands, error: eCand } = await supabaseClient.from('candidatos').select('*');
+                if (eCand) throw eCand;
+                candidates = cands || [];
+
+                // Votos
+                const { data: vts, error: eVot } = await supabaseClient.from('votos').select('*');
+                if (eVot && eVot.code !== 'PGRST116') console.warn(eVot);
+                votosList = vts || [];
+
+            } catch (err) {
+                console.error("Error al cargar datos de Supabase:", err);
+            }
+        }
+
+        function suscribirCambiosEnTiempoReal() {
+            supabaseClient
+                .channel('schema-db-changes')
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'votos' }, async () => {
+                    await cargarDatos();
+                    renderDashboard();
+                })
+                .on('postgres_changes', { event: '*', schema: 'public', table: 'candidatos' }, async () => {
+                    await cargarDatos();
+                    renderDashboard();
+                })
+                .subscribe();
+        }
+
+        function renderDashboard() {
+            const filterAno = document.getElementById('filterAno').value;
+            const container = document.getElementById('dashboardContainer');
+            
+            // Destruir instancias previas de Chart.js
+            Object.keys(chartInstances).forEach(key => {
+                if (chartInstances[key]) chartInstances[key].destroy();
+            });
+            chartInstances = {};
+
+            // Conteo global de votos
+            const conteo = {};
+            votosList.forEach(v => {
+                const id = v.candidato_id || v.candidate_id;
+                if (id) conteo[id] = (conteo[id] || 0) + 1;
+            });
+
+            document.getElementById('statsBadge').innerHTML = `<i class="fa-solid fa-check-to-slot text-emerald-400 mr-1.5"></i> Votos Registrados: <span class="font-bold text-white">${votosList.length}</span>`;
+
+            let anosAProcesar = filterAno === "TODOS" ? ANOS : [filterAno];
+            let html = '';
+
+            anosAProcesar.forEach(ano => {
+                const candidatosAno = candidates.filter(c => c.ano === ano);
+                if (candidatosAno.length === 0 && filterAno !== "TODOS") return;
+
+                html += `
+                    <div class="bg-slate-800/50 border border-slate-700/60 rounded-3xl p-6 shadow-2xl space-y-6">
+                        <div class="flex items-center justify-between border-b border-slate-700/80 pb-4">
+                            <h2 class="text-2xl font-black text-amber-400 tracking-wide flex items-center gap-2">
+                                <i class="fa-solid fa-graduation-cap"></i> ${ano}
+                            </h2>
+                            <span class="text-xs bg-slate-700 text-slate-300 font-semibold px-3 py-1 rounded-lg border border-slate-600">
+                                ${candidatosAno.length} Candidatos
+                            </span>
+                        </div>
+                        
+                        <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+                `;
+
+                VOCERIAS.forEach(voceria => {
+                    const candidatosVoceria = candidatosAno.filter(c => c.voceria === voceria);
+                    
+                    const listaConVotos = candidatosVoceria.map(c => ({
+                        ...c,
+                        totalVotos: conteo[c.id] || c.votos || 0
+                    })).sort((a,b) => b.totalVotos - a.totalVotos);
+
+                    const ganador = listaConVotos[0];
+                    const segundo = listaConVotos[1];
+                    const margenVotos = (ganador && segundo) ? (ganador.totalVotos - segundo.totalVotos) : (ganador ? ganador.totalVotos : 0);
+
+                    const canvasId = `chart_${ano.replace(/[^a-zA-Z0-9]/g, '')}_${voceria.replace(/[^a-zA-Z0-9]/g, '')}`;
+
+                    html += `
+                        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-xl">
+                            <div>
+                                <span class="text-[11px] font-bold uppercase tracking-wider text-indigo-400 bg-indigo-950/60 border border-indigo-800/80 px-2.5 py-1 rounded-md inline-block mb-3">
+                                    ${voceria}
+                                </span>
+
+                                ${ganador ? `
+                                    <div class="bg-slate-800/90 border border-amber-500/40 rounded-xl p-4 flex items-center gap-3 relative overflow-hidden mb-4 shadow-lg">
+                                        <div class="absolute top-0 right-0 bg-amber-500 text-slate-950 font-black text-[10px] uppercase px-2 py-0.5 rounded-bl-lg shadow">
+                                            <i class="fa-solid fa-crown mr-1"></i>Líder
+                                        </div>
+                                        <div class="w-14 h-14 rounded-xl bg-slate-700 border-2 border-amber-400 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                                            ${ganador.photo ? `<img src="${ganador.photo}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-slate-400 text-2xl"></i>`}
+                                        </div>
+                                        <div class="min-w-0 flex-1">
+                                            <h4 class="font-bold text-white text-base truncate">${ganador.nombre} ${ganador.apellido}</h4>
+                                            <p class="text-xs text-slate-400 font-medium">Sección ${ganador.seccion}</p>
+                                            <div class="mt-1 flex items-baseline gap-2">
+                                                <span class="text-lg font-black text-amber-400">${ganador.totalVotos} <span class="text-xs font-normal text-slate-300">votos</span></span>
+                                                <span class="text-[11px] font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-1.5 py-0.5 rounded">
+                                                    +${margenVotos} sobre 2° lugar
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ` : `
+                                    <div class="p-4 bg-slate-800/40 rounded-xl text-center text-slate-500 text-xs mb-4 border border-dashed border-slate-700">
+                                        Sin candidatos registrados
+                                    </div>
+                                `}
+                            </div>
+
+                            <div class="mt-2 bg-slate-950/60 rounded-xl p-3 border border-slate-800/80">
+                                <h5 class="text-[11px] font-semibold text-slate-400 mb-2 flex items-center justify-between">
+                                    <span>Comparativa de Votos</span>
+                                    <i class="fa-solid fa-chart-simple text-amber-400"></i>
+                                </h5>
+                                <div class="relative h-44 w-full flex items-center justify-center">
+                                    ${candidatosVoceria.length > 0 ? `<canvas id="${canvasId}"></canvas>` : `<span class="text-xs text-slate-600">No hay datos suficientes</span>`}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                html += `</div></div>`;
+            });
+
+            container.innerHTML = html;
+
+            setTimeout(() => {
+                anosAProcesar.forEach(ano => {
+                    const candidatosAno = candidates.filter(c => c.ano === ano);
+                    VOCERIAS.forEach(voceria => {
+                        const candidatosVoceria = candidatosAno.filter(c => c.voceria === voceria);
+                        if (candidatosVoceria.length === 0) return;
+
+                        const canvasId = `chart_${ano.replace(/[^a-zA-Z0-9]/g, '')}_${voceria.replace(/[^a-zA-Z0-9]/g, '')}`;
+                        const ctx = document.getElementById(canvasId);
+                        if (!ctx) return;
+
+                        const labels = candidatosVoceria.map(c => `${c.nombre} (${c.seccion})`);
+                        const dataVotos = candidatosVoceria.map(c => conteo[c.id] || c.votos || 0);
+
+                        chartInstances[canvasId] = new Chart(ctx, {
+                            type: 'bar',
+                            data: {
+                                labels: labels,
+                                datasets: [{
+                                    label: 'Votos',
+                                    data: dataVotos,
+                                    backgroundColor: ['#f59e0b', '#6366f1', '#10b981', '#ec4899', '#8b5cf6'],
+                                    borderRadius: 8,
+                                    borderWidth: 0
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: {
+                                    legend: { display: false },
+                                    tooltip: {
+                                        callbacks: {
+                                            label: (ctx) => ` Votos: ${ctx.raw}`
+                                        }
+                                    }
+                                },
+                                scales: {
+                                    x: {
+                                        ticks: { color: '#94a3b8', font: { size: 10 } },
+                                        grid: { display: false }
+                                    },
+                                    y: {
+                                        beginAtZero: true,
+                                        ticks: { color: '#64748b', precision: 0, font: { size: 10 } },
+                                        grid: { color: '#1e293b' }
+                                    }
+                                }
+                            }
+                        });
+                    });
+                });
+            }, 50);
+        }
+
+        function descargarReporteExcel() {
+            if (candidates.length === 0) {
+                showToast("No hay candidatos registrados para exportar", "warning");
+                return;
+            }
+
+            const conteo = {};
+            votosList.forEach(v => {
+                const id = v.candidato_id || v.candidate_id;
+                if (id) conteo[id] = (conteo[id] || 0) + 1;
+            });
+
+            const reporteData = candidates.map((c, idx) => {
+                const totalVotos = conteo[c.id] || c.votos || 0;
+                return {
+                    'N°': idx + 1,
+                    'Año Escolar': c.ano,
+                    'Sección': c.seccion,
+                    'Vocería': c.voceria,
+                    'Candidato': `${c.nombre} ${c.apellido}`,
+                    'Total Votos': totalVotos
+                };
+            });
+
+            const ws = XLSX.utils.json_to_sheet(reporteData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Resultados Votación");
+            
+            const fecha = new Date().toISOString().split('T')[0];
+            XLSX.writeFile(wb, `Reporte_Detallado_Resultados_${fecha}.xlsx`);
+            showToast("Reporte detallado descargado con éxito");
+        }
+
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMessage').textContent = msg;
+            document.getElementById('toastIcon').className = type === 'warning' ? "fa-solid fa-circle-exclamation text-amber-400 text-lg" : "fa-solid fa-circle-check text-emerald-400 text-lg";
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => { toast.classList.add('translate-y-20', 'opacity-0'); }, 3000);
+        }
+
+        window.onload = initRealtimeDashboard;
+    </script>
+</body>
+</html>

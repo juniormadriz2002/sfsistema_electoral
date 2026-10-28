@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Votación Escolar</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+        /* Estilo tipo tarjeta/tarjeta electoral (Boleta) */
+        .electoral-card {
+            aspect-ratio: 3 / 4;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            background-color: #ffffff;
+            border: 2px solid #cbd5e1;
+            border-radius: 8px;
+            overflow: hidden;
+            transition: all 0.2s ease-in-out;
+        }
+
+        /* Estilos específicos para al imprimir */
+        @media print {
+            header, #startupModal, #previewModal, #toast, button {
+                display: none !important;
+            }
+            body {
+                background-color: white !important;
+            }
+            .electoral-card {
+                border: 2px solid #000 !important;
+                break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen font-sans antialiased flex flex-col">
+
+    <!-- Modal Inicial: Ingreso de Cédula del Votante -->
+    <div id="startupModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-md w-full p-8 shadow-2xl border border-slate-100 text-center relative overflow-hidden">
+            <div id="modalIconContainer" class="w-16 h-16 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 text-2xl shadow-inner transition-colors">
+                <i class="fa-solid fa-user-check"></i>
+            </div>
+            <h2 id="modalTitle" class="text-2xl font-black text-slate-800 mb-2">Sistema de Votación</h2>
+            <p id="modalMessage" class="text-xs text-slate-500 mb-6 leading-relaxed">
+                Ingrese su número de cédula para verificar su elegibilidad y proceder a emitir su voto.
+            </p>
+
+            <div id="cedulaContainer" class="space-y-4">
+                <input type="text" id="inputCedulaVotante" placeholder="Ej. 35123456" 
+                    class="w-full px-4 py-3 border border-slate-300 rounded-xl text-center text-lg font-bold tracking-widest focus:ring-2 focus:ring-indigo-500 outline-none">
+                <button onclick="verificarCedulaYEntrar()" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition shadow-lg shadow-indigo-200 font-bold text-sm">
+                    Ingresar a Votar
+                </button>
+            </div>
+
+            <div id="loadingIndicator" class="hidden">
+                <div class="animate-spin text-indigo-600 text-3xl mb-2"><i class="fa-solid fa-circle-notch"></i></div>
+                <p class="text-xs text-slate-400">Verificando base de datos...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Vista Previa del Voto (Confirmación) -->
+    <div id="previewModal" class="hidden fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-100 flex flex-col max-h-[90vh]">
+            <div class="text-center pb-4 border-b border-slate-100 mb-4">
+                <div class="w-12 h-12 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-2 text-xl shadow-inner">
+                    <i class="fa-solid fa-file-invoice"></i>
+                </div>
+                <h3 class="text-xl font-black text-slate-800">Vista Previa de su Votación</h3>
+                <p class="text-xs text-slate-500">Revise sus selecciones antes de confirmar definitivamente.</p>
+            </div>
+
+            <div id="previewContentContainer" class="space-y-4 overflow-y-auto custom-scrollbar flex-1 pr-2">
+                <!-- Generado dinámicamente -->
+            </div>
+
+            <div class="pt-4 border-t border-slate-100 flex gap-3 mt-4">
+                <button onclick="cerrarPreviewModal()" class="flex-1 py-3 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-xs transition">
+                    Volver a Editar
+                </button>
+                <button onclick="registrarVotoDefinitivo()" class="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs transition shadow-lg shadow-emerald-200">
+                    Listo (Registrar Voto)
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-900 text-white px-5 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-slate-700 pointer-events-none">
+        <i id="toastIcon" class="fa-solid fa-circle-check text-emerald-400 text-lg"></i>
+        <span id="toastMessage" class="text-sm font-medium">Operación realizada con éxito</span>
+    </div>
+
+    <!-- Header / Navbar -->
+    <header class="bg-slate-900 text-white shadow-xl sticky top-0 z-30 border-b border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap justify-between items-center gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="bg-indigo-600/30 p-2.5 rounded-xl border border-indigo-500/40 text-indigo-400">
+                    <i class="fa-solid fa-box-archive text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold leading-tight tracking-tight">ElectoEscolar <span class="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30 ml-2">Votaciones</span></h1>
+                    <p class="text-xs text-slate-400">Módulo de Votación Activo</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 sm:gap-3 flex-wrap">
+                <div id="fileSyncBadge" class="text-xs px-3 py-1.5 rounded-xl bg-emerald-950 border border-emerald-700 text-emerald-300 flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span class="font-medium">Supabase Conectado</span>
+                </div>
+
+                <a href="gestion.html" class="text-xs bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 px-3 py-2 rounded-xl transition font-semibold flex items-center gap-1.5" title="Ir al Panel de Gestión">
+                    <i class="fa-solid fa-gears"></i>
+                    <span>Gestión</span>
+                </a>
+
+                <div id="votanteNavInfo" class="text-xs bg-slate-800 px-3 py-2 rounded-xl border border-slate-700 text-slate-300">
+                    Cédula: <span id="navCedulaDisplay" class="font-bold text-indigo-400">---</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Contenido Principal -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full">
+        <div id="vistaVotacion" class="space-y-8">
+            <div class="bg-gradient-to-r from-indigo-900 to-slate-900 text-white p-6 rounded-3xl shadow-xl flex flex-col md:flex-row justify-between items-center gap-4">
+                <div>
+                    <h2 class="text-2xl font-black mb-1">Boleta Electoral Escolar</h2>
+                    <p class="text-xs text-indigo-200">Seleccione un candidato por cada vocería en cada año escolar y confirme al final.</p>
+                </div>
+            </div>
+
+            <!-- Contenedor Dinámico de Tarjetas de Votación -->
+            <div id="boletaElectoralContainer" class="space-y-10"></div>
+
+            <!-- Botón de Confirmar y Emitir Voto al Final -->
+            <div class="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 text-center flex flex-col items-center justify-center gap-3">
+                <p class="text-xs text-slate-500">Una vez verificado que seleccionó a sus candidatos preferidos, proceda a confirmar.</p>
+                <button onclick="mostrarVistaPreviaVoto()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-8 py-4 rounded-2xl shadow-xl shadow-emerald-200 transition flex items-center gap-3 text-base">
+                    <i class="fa-solid fa-check-to-slot text-xl"></i> Confirmar y Emitir Voto
+                </button>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const SUPABASE_URL = 'https://sqcgoeljlpeypqwfcbci.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_MQSUfHsg0hgsIxlYRP2VRw_pPvFEgD_';
+        
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const ANOS = ["1° Año", "2° Año", "3° Año", "4° Año", "5° Año"];
+        const VOCERIAS = ["Vocero Integrador", "Vocero Contralor", "Vocero Activista"];
+
+        let candidates = [];
+        let cedulaActual = "";
+        let eleccionesSeleccionadas = {}; 
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            await fetchCandidatesFromSupabase();
+        });
+
+        async function fetchCandidatesFromSupabase() {
+            try {
+                const { data, error } = await supabaseClient
+                    .from('candidatos')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (error) throw error;
+                candidates = (data || []).map(row => ({
+                    id: row.id,
+                    ano: row.ano,
+                    seccion: row.seccion,
+                    voceria: row.voceria,
+                    nombre: row.nombre,
+                    apellido: row.apellido,
+                    photo: row.photo || '',
+                    fechaRegistro: row.fecha_registro || ''
+                }));
+            } catch (err) {
+                console.error("Error cargando candidatos:", err);
+                showToast("Error al cargar candidatos de la base de datos", "warning");
+            }
+        }
+
+        async function verificarCedulaYEntrar() {
+            const cedulaInput = document.getElementById('inputCedulaVotante').value.trim();
+            if (!cedulaInput || cedulaInput.length < 7 || cedulaInput.length > 8) {
+                showToast("Ingrese un número de cédula válido", "warning");
+                return;
+            }
+
+            document.getElementById('cedulaContainer').classList.add('hidden');
+            document.getElementById('loadingIndicator').classList.remove('hidden');
+            document.getElementById('modalTitle').textContent = "Verificando Padrón Electoral...";
+
+            try {
+                const { data, error } = await supabaseClient
+                    .from('votos')
+                    .select('*')
+                    .eq('cedula', cedulaInput)
+                    .maybeSingle();
+
+                if (error) throw error;
+
+                if (data) {
+                    alert("¡Atención! Esta cédula ya ejerció su derecho al voto anteriormente.");
+                    document.getElementById('cedulaContainer').classList.remove('hidden');
+                    document.getElementById('loadingIndicator').classList.add('hidden');
+                    document.getElementById('modalTitle').textContent = "Sistema de Votación";
+                    return;
+                }
+
+                cedulaActual = cedulaInput;
+                document.getElementById('navCedulaDisplay').textContent = cedulaActual;
+                document.getElementById('startupModal').classList.add('hidden');
+                
+                renderBoletaElectoral();
+                showToast("Acceso autorizado. Puede emitir su voto.");
+
+            } catch (err) {
+                console.error("Error verificando cédula:", err);
+                showToast("Error al conectar con la base de datos", "warning");
+                document.getElementById('cedulaContainer').classList.remove('hidden');
+                document.getElementById('loadingIndicator').classList.add('hidden');
+            }
+        }
+
+        function renderBoletaElectoral() {
+            const container = document.getElementById('boletaElectoralContainer');
+            let html = '';
+
+            ANOS.forEach(ano => {
+                const anoCandidates = candidates.filter(c => c.ano === ano);
+
+                html += `
+                    <div class="bg-white rounded-2xl shadow-md border border-slate-300 p-6 space-y-6">
+                        <div class="border-b-2 border-slate-800 pb-3 flex items-center justify-between">
+                            <h3 class="text-xl font-black text-slate-900 uppercase tracking-wide flex items-center gap-2">
+                                <span class="w-4 h-4 bg-indigo-600 rounded-full"></span> ${ano}
+                            </h3>
+                            <span class="text-xs font-bold bg-slate-200 text-slate-800 px-3 py-1 rounded-md border border-slate-300">
+                                Seleccione 1 por categoría
+                            </span>
+                        </div>
+                        <div class="space-y-8">
+                `;
+
+                VOCERIAS.forEach(voceria => {
+                    const voceriaCandidatos = anoCandidates.filter(c => c.voceria === voceria);
+
+                    html += `
+                        <div>
+                            <h4 class="text-sm font-black text-slate-800 uppercase tracking-wider mb-3 bg-slate-100 p-2 rounded-lg border-l-4 border-indigo-600">
+                                ${voceria}
+                            </h4>
+                            
+                            <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    `;
+
+                    if (voceriaCandidatos.length === 0) {
+                        html += `<p class="col-span-full text-xs text-slate-400 text-center py-4 italic">No hay candidatos postulados</p>`;
+                    } else {
+                        voceriaCandidatos.forEach(c => {
+                            const isSelected = eleccionesSeleccionadas[ano]?.[voceria] === c.id;
+                            html += `
+                                <div onclick="seleccionarVoto('${ano}', '${voceria}', '${c.id}')" 
+                                    class="electoral-card cursor-pointer relative ${isSelected ? 'ring-4 ring-indigo-600 border-indigo-600 shadow-xl scale-[1.02]' : 'hover:border-indigo-400 hover:shadow-md'}">
+                                    
+                                    <!-- Indicador de Selección superior -->
+                                    <div class="absolute top-2 right-2 z-10 w-7 h-7 rounded-full border-2 flex items-center justify-center shadow-md ${isSelected ? 'border-white bg-indigo-600 text-white' : 'border-slate-400 bg-white/80'}">
+                                        ${isSelected ? '<i class="fa-solid fa-check text-xs"></i>' : ''}
+                                    </div>
+
+                                    <!-- Imagen del Candidato Gran Tamaño -->
+                                    <div class="w-full flex-1 bg-slate-200 overflow-hidden relative flex items-center justify-center">
+                                        ${c.photo 
+                                            ? `<img src="${c.photo}" class="w-full h-full object-cover object-top">` 
+                                            : `<i class="fa-solid fa-user text-slate-400 text-5xl"></i>`
+                                        }
+                                    </div>
+
+                                    <!-- Bloque Inferior: Nombre y Datos del Candidato -->
+                                    <div class="bg-slate-900 text-white p-2 text-center border-t border-slate-200 flex flex-col justify-center min-h-[55px]">
+                                        <span class="text-[9px] font-bold uppercase tracking-wider text-indigo-300 bg-indigo-950 px-1.5 py-0.5 rounded border border-indigo-800 self-center mb-0.5">
+                                            Sec. ${c.seccion}
+                                        </span>
+                                        <h5 class="font-black text-xs leading-tight uppercase truncate">
+                                            ${c.nombre} ${c.apellido}
+                                        </h5>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                    }
+
+                    html += `</div></div>`;
+                });
+
+                html += `</div></div>`;
+            });
+
+            container.innerHTML = html;
+        }
+
+        function seleccionarVoto(ano, voceria, candidateId) {
+            if (!eleccionesSeleccionadas[ano]) {
+                eleccionesSeleccionadas[ano] = {};
+            }
+            eleccionesSeleccionadas[ano][voceria] = candidateId;
+            renderBoletaElectoral();
+        }
+
+        function mostrarVistaPreviaVoto() {
+            if (Object.keys(eleccionesSeleccionadas).length === 0) {
+                alert("Debe seleccionar al menos un candidato antes de emitir su voto.");
+                return;
+            }
+
+            const container = document.getElementById('previewContentContainer');
+            let html = '';
+
+            Object.keys(eleccionesSeleccionadas).forEach(ano => {
+                html += `<div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-3">
+                            <h4 class="text-xs font-black uppercase text-indigo-700 border-b border-slate-200 pb-1">${ano}</h4>`;
+
+                Object.keys(eleccionesSeleccionadas[ano]).forEach(voceria => {
+                    const candidateId = eleccionesSeleccionadas[ano][voceria];
+                    const c = candidates.find(item => item.id === candidateId);
+
+                    if (c) {
+                        html += `
+                            <div class="flex items-center gap-3 bg-white p-2.5 rounded-xl border border-slate-200">
+                                <div class="w-10 h-10 rounded-lg bg-slate-200 overflow-hidden flex-shrink-0 flex items-center justify-center">
+                                    ${c.photo ? `<img src="${c.photo}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-slate-400 text-xs"></i>`}
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <p class="text-[10px] font-bold text-slate-400 uppercase">${voceria}</p>
+                                    <p class="text-xs font-black text-slate-800 truncate">${c.nombre} ${c.apellido} (Sec. ${c.seccion})</p>
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+
+                html += `</div>`;
+            });
+
+            container.innerHTML = html;
+            document.getElementById('previewModal').classList.remove('hidden');
+        }
+
+        function cerrarPreviewModal() {
+            document.getElementById('previewModal').classList.add('hidden');
+        }
+
+        async function registrarVotoDefinitivo() {
+            if (!cedulaActual) {
+                alert("Error de sesión de votante");
+                return;
+            }
+
+            try {
+                const votoRecord = {
+                    id: 'voto-' + Date.now(),
+                    cedula: cedulaActual,
+                    votos_por_ano: eleccionesSeleccionadas,
+                    fecha_voto: new Date().toLocaleString('es-ES')
+                };
+
+                const { error } = await supabaseClient
+                    .from('votos')
+                    .insert([votoRecord]);
+
+                if (error) throw error;
+
+                alert("¡Su voto ha sido registrado con éxito! Gracias por participar.");
+                location.reload();
+
+            } catch (err) {
+                console.error("Error al registrar voto:", err);
+                showToast("Error al emitir el voto. Es posible que esta cédula ya haya votado.", "warning");
+                cerrarPreviewModal();
+            }
+        }
+
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMessage').textContent = msg;
+            document.getElementById('toastIcon').className = type === 'warning' ? "fa-solid fa-circle-exclamation text-amber-400 text-lg" : "fa-solid fa-circle-check text-emerald-400 text-lg";
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => { toast.classList.add('translate-y-20', 'opacity-0'); }, 3000);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel de Gestión - Registro Escolar</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- SheetJS CDN para exportar a Excel -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Supabase JS Client -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen font-sans antialiased flex flex-col">
+
+    <!-- Modal Autenticación Administrador -->
+    <div id="authModal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-100 text-center">
+            <div class="w-14 h-14 bg-indigo-100 text-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-3 text-xl shadow-inner">
+                <i class="fa-solid fa-lock"></i>
+            </div>
+            <h3 id="authModalTitle" class="text-xl font-black text-slate-800 mb-1">Acceso Administrativo</h3>
+            <p id="authModalDesc" class="text-xs text-slate-500 mb-4">Ingrese la clave de gestión para continuar.</p>
+            
+            <input type="password" id="inputAdminPass" placeholder="••••••••" 
+                class="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-center text-base font-bold mb-3 focus:ring-2 focus:ring-indigo-500 outline-none"
+                onkeyup="if(event.key==='Enter') ejecutarAuthModal()">
+            
+            <button onclick="ejecutarAuthModal()" class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition shadow-lg shadow-indigo-200 font-bold text-xs mb-2">
+                Confirmar
+            </button>
+            <a id="btnVolverVotacion" href="index.html" class="block text-xs text-slate-400 hover:text-slate-600 transition">Volver a Votación</a>
+            <button id="btnCancelarAuthModal" onclick="cerrarAuthModal()" class="hidden text-xs text-red-500 hover:text-red-700 font-semibold mt-1">Cancelar</button>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-900 text-white px-5 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-slate-700 pointer-events-none">
+        <i id="toastIcon" class="fa-solid fa-circle-check text-emerald-400 text-lg"></i>
+        <span id="toastMessage" class="text-sm font-medium">Operación realizada con éxito</span>
+    </div>
+
+    <!-- Header / Navbar -->
+    <header class="bg-slate-900 text-white shadow-xl sticky top-0 z-30 border-b border-slate-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap justify-between items-center gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="bg-indigo-600/30 p-2.5 rounded-xl border border-indigo-500/40 text-indigo-400">
+                    <i class="fa-solid fa-gears text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold leading-tight tracking-tight">ElectoEscolar <span class="text-xs bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30 ml-2">Gestión</span></h1>
+                    <p class="text-xs text-slate-400">Panel de Administración de Candidatos y Resultados</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 sm:gap-3 flex-wrap">
+                <div id="fileSyncBadge" class="text-xs px-3 py-1.5 rounded-xl bg-emerald-950 border border-emerald-700 text-emerald-300 flex items-center gap-2">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span class="font-medium">Supabase Conectado</span>
+                </div>
+
+                <!-- Botón Emitir Resultados -->
+                <button onclick="emitirResultados()" class="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-xl transition font-semibold flex items-center gap-1.5 shadow-md">
+                    <i class="fa-solid fa-chart-column"></i>
+                    <span>Emitir Resultados</span>
+                </button>
+
+                <!-- Botón Nueva Votación -->
+                <button onclick="solicitarNuevaVotacion()" class="text-xs bg-rose-600 hover:bg-rose-500 text-white px-3 py-2 rounded-xl transition font-semibold flex items-center gap-1.5 shadow-md">
+                    <i class="fa-solid fa-rotate-left"></i>
+                    <span>Nueva Votación</span>
+                </button>
+
+                <a href="index.html" class="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-xl transition font-semibold flex items-center gap-1.5">
+                    <i class="fa-solid fa-person-booth"></i>
+                    <span>Ir a Votación</span>
+                </a>
+
+                <button onclick="exportToExcel()" class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-xl transition border border-slate-700" title="Exportar Respaldo Excel">
+                    <i class="fa-solid fa-download text-emerald-400"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Contenido Principal: Módulo de Gestión -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full">
+        <div id="vistaGestion" class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            <section class="lg:col-span-5 xl:col-span-4">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sticky top-20">
+                    <div class="flex justify-between items-center mb-5 pb-3 border-b border-slate-100">
+                        <h2 id="formTitle" class="text-base font-bold text-slate-800 flex items-center gap-2">
+                            <i class="fa-solid fa-user-plus text-indigo-600"></i>
+                            <span>Registrar Candidato</span>
+                        </h2>
+                        <button id="cancelEditBtn" onclick="resetForm()" class="hidden text-xs text-slate-500 hover:text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg">
+                            <i class="fa-solid fa-xmark mr-1"></i>Cancelar
+                        </button>
+                    </div>
+
+                    <form id="candidateForm" onsubmit="handleFormSubmit(event)" class="space-y-4">
+                        <input type="hidden" id="candidateId">
+                        <div class="flex items-center gap-4 p-3 bg-slate-50 rounded-xl border border-slate-200/80">
+                            <div class="relative w-16 h-16 rounded-xl bg-slate-200 border-2 border-indigo-200 overflow-hidden flex-shrink-0 flex items-center justify-center shadow-inner group">
+                                <img id="photoPreview" src="" alt="Vista previa" class="w-full h-full object-cover hidden">
+                                <i id="photoPlaceholder" class="fa-solid fa-user text-slate-400 text-2xl"></i>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <label class="block text-xs font-semibold text-slate-700 mb-1">Fotografía del Candidato</label>
+                                <input type="file" id="photoInput" accept="image/*" onchange="handlePhotoSelect(event)" class="text-xs text-slate-500 file:mr-2 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-700 mb-1">Nombre(s) *</label>
+                                <input type="text" id="nombre" required placeholder="Ej. Carlos" class="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-700 mb-1">Apellido(s) *</label>
+                                <input type="text" id="apellido" required placeholder="Ej. Mendoza" class="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-700 mb-1">Año Escolar *</label>
+                                <select id="ano" required onchange="updateFormSlotAvailability()" class="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                                    <option value="1° Año">1° Año</option>
+                                    <option value="2° Año">2° Año</option>
+                                    <option value="3° Año">3° Año</option>
+                                    <option value="4° Año">4° Año</option>
+                                    <option value="5° Año">5° Año</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-semibold text-slate-700 mb-1">Sección *</label>
+                                <select id="seccion" required class="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                                    <option value="A">Sección A</option>
+                                    <option value="B">Sección B</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-700 mb-1">Vocería a la que Postula *</label>
+                            <select id="voceria" required onchange="updateFormSlotAvailability()" class="w-full px-3 py-2 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white">
+                                <option value="Vocero Integrador">Vocero Integrador</option>
+                                <option value="Vocero Contralor">Vocero Contralor</option>
+                                <option value="Vocero Activista">Vocero Activista</option>
+                            </select>
+                        </div>
+
+                        <div id="slotNotice" class="text-xs p-2.5 rounded-xl bg-slate-100 text-slate-600 border border-slate-200 flex items-center justify-between">
+                            <span>Cupos ocupados:</span>
+                            <span id="slotCountBadge" class="font-bold px-2 py-0.5 rounded-full bg-slate-200 text-slate-800">0 / 3</span>
+                        </div>
+
+                        <div class="pt-2">
+                            <button type="submit" id="submitBtn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2.5 rounded-xl shadow-md transition flex items-center justify-center gap-2">
+                                <i class="fa-solid fa-floppy-disk"></i> <span>Guardar Candidato</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </section>
+
+            <section class="lg:col-span-7 xl:col-span-8 flex flex-col gap-6">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+                    <div class="flex items-center gap-2 w-full sm:w-auto">
+                        <span class="text-xs font-semibold text-slate-500 uppercase tracking-wider">Año:</span>
+                        <select id="filterAno" onchange="renderCandidates()" class="w-full sm:w-auto px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 bg-slate-50 outline-none">
+                            <option value="TODOS">Todos</option>
+                            <option value="1° Año">1° Año</option>
+                            <option value="2° Año">2° Año</option>
+                            <option value="3° Año">3° Año</option>
+                            <option value="4° Año">4° Año</option>
+                            <option value="5° Año">5° Año</option>
+                        </select>
+                    </div>
+                    <div class="text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+                        <i class="fa-solid fa-users text-indigo-600 mr-1"></i> <span id="totalCandidatesBadge">0 / 45</span> Candidatos
+                    </div>
+                </div>
+                <div id="candidatesListContainer" class="space-y-6"></div>
+            </section>
+        </div>
+    </main>
+
+    <script>
+        const SUPABASE_URL = 'https://sqcgoeljlpeypqwfcbci.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_MQSUfHsg0hgsIxlYRP2VRw_pPvFEgD_';
+        
+        const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        const ANOS = ["1° Año", "2° Año", "3° Año", "4° Año", "5° Año"];
+        const VOCERIAS = ["Vocero Integrador", "Vocero Contralor", "Vocero Activista"];
+        const MAX_CANDIDATOS_PER_VOCERIA = 3;
+
+        let candidates = [];
+        let editingId = null;
+        let photoBase64 = "";
+        let authMode = "login"; // "login" o "reset"
+
+        function abrirAuthModal(modo) {
+            authMode = modo;
+            const inputPass = document.getElementById('inputAdminPass');
+            inputPass.value = '';
+            
+            if (modo === "login") {
+                document.getElementById('authModalTitle').textContent = "Acceso Administrativo";
+                document.getElementById('authModalDesc').textContent = "Ingrese la clave de gestión para continuar.";
+                document.getElementById('btnVolverVotacion').classList.remove('hidden');
+                document.getElementById('btnCancelarAuthModal').classList.add('hidden');
+            } else if (modo === "reset") {
+                document.getElementById('authModalTitle').textContent = "Confirmar Restablecimiento";
+                document.getElementById('authModalDesc').textContent = "ATENCIÓN: Ingrese la contraseña de gestión para BORRAR todos los candidatos y votaciones.";
+                document.getElementById('btnVolverVotacion').classList.add('hidden');
+                document.getElementById('btnCancelarAuthModal').classList.remove('hidden');
+            }
+            document.getElementById('authModal').classList.remove('hidden');
+            inputPass.focus();
+        }
+
+        function cerrarAuthModal() {
+            document.getElementById('authModal').classList.add('hidden');
+        }
+
+        function ejecutarAuthModal() {
+            const pass = document.getElementById('inputAdminPass').value;
+            if (pass === "admin123" || pass === "1234") {
+                if (authMode === "login") {
+                    cerrarAuthModal();
+                    initApp();
+                    showToast("Modo Gestión Activado");
+                } else if (authMode === "reset") {
+                    cerrarAuthModal();
+                    resetearBaseDeDatos();
+                }
+            } else {
+                alert("Contraseña incorrecta");
+            }
+        }
+
+        function verificarClaveAdmin() {
+            ejecutarAuthModal();
+        }
+
+        async function initApp() {
+            await fetchCandidatesFromSupabase();
+            renderCandidates();
+            updateFormSlotAvailability();
+        }
+
+        async function fetchCandidatesFromSupabase() {
+            try {
+                const { data, error } = await supabaseClient
+                    .from('candidatos')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (error) throw error;
+                candidates = (data || []).map(row => ({
+                    id: row.id,
+                    ano: row.ano,
+                    seccion: row.seccion,
+                    voceria: row.voceria,
+                    nombre: row.nombre,
+                    apellido: row.apellido,
+                    photo: row.photo || '',
+                    fechaRegistro: row.fecha_registro || ''
+                }));
+            } catch (err) {
+                console.error("Error cargando candidatos:", err);
+            }
+        }
+
+        async function handleFormSubmit(e) {
+            e.preventDefault();
+            const nombre = document.getElementById('nombre').value.trim();
+            const apellido = document.getElementById('apellido').value.trim();
+            const ano = document.getElementById('ano').value;
+            const seccion = document.getElementById('seccion').value;
+            const voceria = document.getElementById('voceria').value;
+
+            const existingCount = candidates.filter(c => c.ano === ano && c.voceria === voceria && c.id !== editingId).length;
+            if (existingCount >= MAX_CANDIDATOS_PER_VOCERIA) {
+                showToast(`Ya existen 3 candidatos registrados para ${voceria} en ${ano}.`, 'warning');
+                return;
+            }
+
+            try {
+                if (editingId) {
+                    const current = candidates.find(c => c.id === editingId);
+                    const updatedData = { ano, seccion, voceria, nombre, apellido, photo: photoBase64 || (current ? current.photo : '') };
+                    const { error } = await supabaseClient.from('candidatos').update(updatedData).eq('id', editingId);
+                    if (error) throw error;
+                    showToast("Candidato actualizado");
+                } else {
+                    const newRecord = {
+                        id: 'cand-' + Date.now(),
+                        ano, seccion, voceria, nombre, apellido,
+                        photo: photoBase64,
+                        fecha_registro: new Date().toLocaleDateString('es-ES')
+                    };
+                    const { error } = await supabaseClient.from('candidatos').insert([newRecord]);
+                    if (error) throw error;
+                    showToast("Candidato registrado");
+                }
+
+                await fetchCandidatesFromSupabase();
+                resetForm();
+                renderCandidates();
+            } catch (err) {
+                showToast("Error al guardar en Supabase", "warning");
+            }
+        }
+
+        function resetForm() {
+            editingId = null;
+            photoBase64 = "";
+            document.getElementById('candidateForm').reset();
+            document.getElementById('candidateId').value = '';
+            document.getElementById('photoPreview').classList.add('hidden');
+            document.getElementById('photoPlaceholder').classList.remove('hidden');
+            document.getElementById('formTitle').innerHTML = `<i class="fa-solid fa-user-plus text-indigo-600"></i> <span>Registrar Candidato</span>`;
+            document.getElementById('submitBtn').innerHTML = `<i class="fa-solid fa-floppy-disk"></i> <span>Guardar Candidato</span>`;
+            document.getElementById('cancelEditBtn').classList.add('hidden');
+            updateFormSlotAvailability();
+        }
+
+        function editCandidate(id) {
+            const c = candidates.find(item => item.id === id);
+            if (!c) return;
+            editingId = id;
+            document.getElementById('candidateId').value = c.id;
+            document.getElementById('nombre').value = c.nombre;
+            document.getElementById('apellido').value = c.apellido;
+            document.getElementById('ano').value = c.ano;
+            document.getElementById('seccion').value = c.seccion;
+            document.getElementById('voceria').value = c.voceria;
+            photoBase64 = c.photo || '';
+
+            const preview = document.getElementById('photoPreview');
+            const placeholder = document.getElementById('photoPlaceholder');
+            if (photoBase64) {
+                preview.src = photoBase64;
+                preview.classList.remove('hidden');
+                placeholder.classList.add('hidden');
+            } else {
+                preview.classList.add('hidden');
+                placeholder.classList.remove('hidden');
+            }
+
+            document.getElementById('formTitle').innerHTML = `<i class="fa-solid fa-pen-to-square text-amber-500"></i> <span>Editar Candidato</span>`;
+            document.getElementById('submitBtn').innerHTML = `<i class="fa-solid fa-rotate"></i> <span>Actualizar Datos</span>`;
+            document.getElementById('cancelEditBtn').classList.remove('hidden');
+            updateFormSlotAvailability();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        async function deleteCandidate(id) {
+            if (confirm("¿Estás seguro de eliminar este candidato?")) {
+                const { error } = await supabaseClient.from('candidatos').delete().eq('id', id);
+                if (error) { showToast("Error al eliminar", "warning"); return; }
+                await fetchCandidatesFromSupabase();
+                renderCandidates();
+                updateFormSlotAvailability();
+                showToast('Candidato eliminado');
+            }
+        }
+
+        function handlePhotoSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                photoBase64 = e.target.result;
+                const preview = document.getElementById('photoPreview');
+                const placeholder = document.getElementById('photoPlaceholder');
+                preview.src = photoBase64;
+                preview.classList.remove('hidden');
+                placeholder.classList.add('hidden');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function updateFormSlotAvailability() {
+            const ano = document.getElementById('ano').value;
+            const voceria = document.getElementById('voceria').value;
+            const badge = document.getElementById('slotCountBadge');
+            const count = candidates.filter(c => c.ano === ano && c.voceria === voceria && c.id !== editingId).length;
+            badge.textContent = `${count} / ${MAX_CANDIDATOS_PER_VOCERIA}`;
+        }
+
+        function renderCandidates() {
+            const container = document.getElementById('candidatesListContainer');
+            const filterAno = document.getElementById('filterAno').value;
+            document.getElementById('totalCandidatesBadge').textContent = `${candidates.length} / 45`;
+            let filteredAnos = filterAno === "TODOS" ? ANOS : [filterAno];
+            let html = '';
+
+            filteredAnos.forEach(ano => {
+                const anoCandidates = candidates.filter(c => c.ano === ano);
+                if (anoCandidates.length > 0 || filterAno !== "TODOS") {
+                    html += `
+                        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div class="bg-slate-900 text-white px-5 py-3 flex justify-between items-center">
+                                <span class="bg-indigo-500 text-white text-xs font-bold px-2.5 py-1 rounded-lg">${ano}</span>
+                            </div>
+                            <div class="p-4 space-y-6">
+                    `;
+                    VOCERIAS.forEach(voceria => {
+                        const voceriaCandidates = anoCandidates.filter(c => c.voceria === voceria);
+                        html += `
+                            <div>
+                                <h4 class="text-xs font-bold uppercase text-slate-700 mb-3 pb-1 border-b border-slate-100">${voceria} (${voceriaCandidates.length}/3)</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        `;
+                        for (let slot = 0; slot < MAX_CANDIDATOS_PER_VOCERIA; slot++) {
+                            const candidate = voceriaCandidates[slot];
+                            if (candidate) {
+                                html += `
+                                    <div class="bg-slate-50 rounded-xl border border-slate-200 p-3 flex flex-col justify-between">
+                                        <div class="flex items-start gap-3">
+                                            <div class="w-12 h-12 rounded-xl bg-slate-200 border overflow-hidden flex-shrink-0 flex items-center justify-center">
+                                                ${candidate.photo ? `<img src="${candidate.photo}" class="w-full h-full object-cover">` : `<i class="fa-solid fa-user text-slate-400"></i>`}
+                                            </div>
+                                            <div class="min-w-0 flex-1">
+                                                <span class="text-[10px] font-bold bg-indigo-100 text-indigo-800 px-1.5 py-0.5 rounded">Sección ${candidate.seccion}</span>
+                                                <h5 class="font-bold text-slate-800 text-sm truncate mt-1">${candidate.nombre} ${candidate.apellido}</h5>
+                                            </div>
+                                        </div>
+                                        <div class="flex justify-end gap-1 pt-2 border-t border-slate-200 mt-2">
+                                            <button onclick="editCandidate('${candidate.id}')" class="p-1 text-slate-400 hover:text-amber-600"><i class="fa-solid fa-pen-to-square"></i></button>
+                                            <button onclick="deleteCandidate('${candidate.id}')" class="p-1 text-slate-400 hover:text-red-600"><i class="fa-solid fa-trash-can"></i></button>
+                                        </div>
+                                    </div>
+                                `;
+                            } else {
+                                html += `<div class="border-2 border-dashed border-slate-200 rounded-xl p-3 flex items-center justify-center text-slate-400 min-h-[80px]"><span class="text-xs">Disponible</span></div>`;
+                            }
+                        }
+                        html += `</div></div>`;
+                    });
+                    html += `</div></div>`;
+                }
+            });
+            container.innerHTML = html;
+        }
+
+        function exportToExcel() {
+            if (candidates.length === 0) { showToast("No hay candidatos", "warning"); return; }
+            const exportData = candidates.map((c, i) => ({ 'N°': i+1, 'Año': c.ano, 'Sección': c.seccion, 'Vocería': c.voceria, 'Nombre': c.nombre, 'Apellido': c.apellido, 'Fecha': c.fechaRegistro }));
+            const ws = XLSX.utils.json_to_sheet(exportData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Candidatos");
+            XLSX.writeFile(wb, `Respaldo_Candidatos.xlsx`);
+            showToast("Respaldo descargado");
+        }
+
+        /* --- EMITIR REPORTES Y NUEVA VOTACIÓN --- */
+
+        async function emitirResultados() {
+            showToast("Redirigiendo a Resultados en Vivo...");
+    setTimeout(() => {
+        window.location.href = 'resultados.html';
+    }, 800);
+        }
+        
+        function solicitarNuevaVotacion() {
+            if (confirm("¿Está seguro de reiniciar el sistema para una NUEVA VOTACIÓN?\nSe requerirá la contraseña administrativa para realizar la limpieza de la base de datos.")) {
+                abrirAuthModal("reset");
+            }
+        }
+
+        async function resetearBaseDeDatos() {
+            try {
+                showToast("Limpiando base de datos...", "warning");
+
+                // Intentar vaciar la tabla de votos si existe
+                try {
+                    await supabaseClient.from('votos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+                } catch (e) {
+                    console.log("No se pudo limpiar tabla de votos:", e);
+                }
+
+                // Vaciar la tabla de candidatos
+                const { error: errorCand } = await supabaseClient.from('candidatos').delete().neq('id', '00000000-0000-0000-0000-000000000000');
+                
+                if (errorCand) {
+                    // Fallback si neq no funciona con texto
+                    const { data: allCands } = await supabaseClient.from('candidatos').select('id');
+                    if (allCands && allCands.length > 0) {
+                        const ids = allCands.map(item => item.id);
+                        await supabaseClient.from('candidatos').delete().in('id', ids);
+                    }
+                }
+
+                await fetchCandidatesFromSupabase();
+                resetForm();
+                renderCandidates();
+                showToast("Base de datos reiniciada para Nueva Votación");
+
+            } catch (err) {
+                console.error("Error restableciendo la base de datos:", err);
+                showToast("Error al restablecer los datos", "warning");
+            }
+        }
+
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            document.getElementById('toastMessage').textContent = msg;
+            document.getElementById('toastIcon').className = type === 'warning' ? "fa-solid fa-circle-exclamation text-amber-400 text-lg" : "fa-solid fa-circle-check text-emerald-400 text-lg";
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => { toast.classList.add('translate-y-20', 'opacity-0'); }, 3000);
+        }
+    </script>
+</body>
+</html>
