@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Resultados en Tiempo Real - ElectoEscolar</title>
     <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tailwindcss@3"></script>
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Chart.js -->
@@ -120,11 +120,12 @@
 
                 // Votos
                 const { data: vts, error: eVot } = await supabaseClient.from('votos').select('*');
-                if (eVot && eVot.code !== 'PGRST116') console.warn(eVot);
+                if (eVot) console.warn(eVot);
                 votosList = vts || [];
 
             } catch (err) {
                 console.error("Error al cargar datos de Supabase:", err);
+                showToast("Error al sincronizar con la base de datos", "warning");
             }
         }
 
@@ -143,13 +144,32 @@
                 .subscribe();
         }
 
+        function extraerIdsVotos(votosAno) {
+            let ids = [];
+            if (!votosAno) return ids;
+
+            if (typeof votosAno === 'object') {
+                // Si es un objeto anidado o plano, recorremos recursivamente o por valores
+                Object.values(votosAno).forEach(val => {
+                    if (typeof val === 'string' && val.trim() !== '') {
+                        ids.push(val);
+                    } else if (typeof val === 'object' && val !== null) {
+                        ids = ids.concat(extraerIdsVotos(val));
+                    }
+                });
+            }
+            return ids;
+        }
+
         function renderDashboard() {
             const filterAno = document.getElementById('filterAno').value;
             const container = document.getElementById('dashboardContainer');
             
-            // Destruir instancias previas de Chart.js
+            // Destruir instancias previas de Chart.js de forma segura
             Object.keys(chartInstances).forEach(key => {
-                if (chartInstances[key]) chartInstances[key].destroy();
+                if (chartInstances[key]) {
+                    chartInstances[key].destroy();
+                }
             });
             chartInstances = {};
 
@@ -159,15 +179,10 @@
 
             votosList.forEach(v => {
                 totalVotosEmitidos++;
-                // votos_por_ano suele ser un objeto JSON que mapea la vocería o año con el ID del candidato seleccionado
-                const votosAno = v.votos_por_ano;
-                if (votosAno && typeof votosAno === 'object') {
-                    Object.values(votosAno).forEach(candidatoId => {
-                        if (candidatoId) {
-                            conteo[candidatoId] = (conteo[candidatoId] || 0) + 1;
-                        }
-                    });
-                }
+                const idsVotados = extraerIdsVotos(v.votos_por_ano);
+                idsVotados.forEach(candidatoId => {
+                    conteo[candidatoId] = (conteo[candidatoId] || 0) + 1;
+                });
             });
 
             document.getElementById('statsBadge').innerHTML = `<i class="fa-solid fa-check-to-slot text-emerald-400 mr-1.5"></i> Votos Registrados: <span class="font-bold text-white">${totalVotosEmitidos}</span>`;
@@ -228,7 +243,7 @@
                                             <div class="mt-1 flex items-baseline gap-2">
                                                 <span class="text-lg font-black text-amber-400">${ganador.totalVotos} <span class="text-xs font-normal text-slate-300">votos</span></span>
                                                 <span class="text-[11px] font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-800 px-1.5 py-0.5 rounded">
-                                                    +${margenVotos} sobre 2° lugar
+                                                    +${margenVotos} sobre 2°
                                                 </span>
                                             </div>
                                         </div>
@@ -258,6 +273,7 @@
 
             container.innerHTML = html;
 
+            // Renderizar gráficos con Chart.js tras actualizar el DOM
             setTimeout(() => {
                 anosAProcesar.forEach(ano => {
                     const candidatosAno = candidates.filter(c => c.ano === ano);
@@ -321,14 +337,10 @@
 
             const conteo = {};
             votosList.forEach(v => {
-                const votosAno = v.votos_por_ano;
-                if (votosAno && typeof votosAno === 'object') {
-                    Object.values(votosAno).forEach(candidatoId => {
-                        if (candidatoId) {
-                            conteo[candidatoId] = (conteo[candidatoId] || 0) + 1;
-                        }
-                    });
-                }
+                const idsVotados = extraerIdsVotos(v.votos_por_ano);
+                idsVotados.forEach(candidatoId => {
+                    conteo[candidatoId] = (conteo[candidatoId] || 0) + 1;
+                });
             });
 
             const reporteData = candidates.map((c, idx) => {
@@ -360,7 +372,8 @@
             setTimeout(() => { toast.classList.add('translate-y-20', 'opacity-0'); }, 3000);
         }
 
-        window.onload = initRealtimeDashboard;
+        // Inicializar al cargar la página
+        document.addEventListener('DOMContentLoaded', initRealtimeDashboard);
     </script>
 </body>
 </html>
