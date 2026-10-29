@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Resultados en Tiempo Real - ElectoEscolar</title>
     <!-- Tailwind CSS -->
-    <script src="https://cdn.jsdelivr.net/npm/tailwindcss@3"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Chart.js -->
@@ -144,17 +144,34 @@
                 .subscribe();
         }
 
-        function extraerIdsVotos(votosAno) {
+        function extraerIdsVotos(votosAno, validCandidateIds) {
             let ids = [];
             if (!votosAno) return ids;
 
-            if (typeof votosAno === 'object') {
-                // Si es un objeto anidado o plano, recorremos recursivamente o por valores
-                Object.values(votosAno).forEach(val => {
-                    if (typeof val === 'string' && val.trim() !== '') {
-                        ids.push(val);
+            let parsed = votosAno;
+            if (typeof votosAno === 'string') {
+                try {
+                    parsed = JSON.parse(votosAno);
+                } catch (e) {
+                    if (validCandidateIds.has(votosAno)) {
+                        ids.push(votosAno);
+                    }
+                    return ids;
+                }
+            }
+
+            if (typeof parsed === 'object' && parsed !== null) {
+                Object.entries(parsed).forEach(([key, val]) => {
+                    if (validCandidateIds.has(key)) {
+                        ids.push(key);
+                    }
+                    if (typeof val === 'string' || typeof val === 'number') {
+                        const strVal = String(val);
+                        if (validCandidateIds.has(strVal)) {
+                            ids.push(strVal);
+                        }
                     } else if (typeof val === 'object' && val !== null) {
-                        ids = ids.concat(extraerIdsVotos(val));
+                        ids = ids.concat(extraerIdsVotos(val, validCandidateIds));
                     }
                 });
             }
@@ -165,7 +182,7 @@
             const filterAno = document.getElementById('filterAno').value;
             const container = document.getElementById('dashboardContainer');
             
-            // Destruir instancias previas de Chart.js de forma segura
+            // Destruir instancias previas de Chart.js
             Object.keys(chartInstances).forEach(key => {
                 if (chartInstances[key]) {
                     chartInstances[key].destroy();
@@ -173,13 +190,15 @@
             });
             chartInstances = {};
 
-            // Conteo global de votos adaptado a votos_por_ano (jsonb)
+            const validCandidateIds = new Set(candidates.map(c => String(c.id)));
+
+            // Conteo global de votos adaptado a votos_por_ano
             const conteo = {};
             let totalVotosEmitidos = 0;
 
             votosList.forEach(v => {
                 totalVotosEmitidos++;
-                const idsVotados = extraerIdsVotos(v.votos_por_ano);
+                const idsVotados = extraerIdsVotos(v.votos_por_ano, validCandidateIds);
                 idsVotados.forEach(candidatoId => {
                     conteo[candidatoId] = (conteo[candidatoId] || 0) + 1;
                 });
@@ -213,7 +232,7 @@
                     
                     const listaConVotos = candidatosVoceria.map(c => ({
                         ...c,
-                        totalVotos: conteo[c.id] || 0
+                        totalVotos: conteo[String(c.id)] || 0
                     })).sort((a,b) => b.totalVotos - a.totalVotos);
 
                     const ganador = listaConVotos[0];
@@ -273,7 +292,6 @@
 
             container.innerHTML = html;
 
-            // Renderizar gráficos con Chart.js tras actualizar el DOM
             setTimeout(() => {
                 anosAProcesar.forEach(ano => {
                     const candidatosAno = candidates.filter(c => c.ano === ano);
@@ -286,7 +304,7 @@
                         if (!ctx) return;
 
                         const labels = candidatosVoceria.map(c => `${c.nombre} (${c.seccion})`);
-                        const dataVotos = candidatosVoceria.map(c => conteo[c.id] || 0);
+                        const dataVotos = candidatosVoceria.map(c => conteo[String(c.id)] || 0);
 
                         chartInstances[canvasId] = new Chart(ctx, {
                             type: 'bar',
@@ -335,16 +353,17 @@
                 return;
             }
 
+            const validCandidateIds = new Set(candidates.map(c => String(c.id)));
             const conteo = {};
             votosList.forEach(v => {
-                const idsVotados = extraerIdsVotos(v.votos_por_ano);
+                const idsVotados = extraerIdsVotos(v.votos_por_ano, validCandidateIds);
                 idsVotados.forEach(candidatoId => {
                     conteo[candidatoId] = (conteo[candidatoId] || 0) + 1;
                 });
             });
 
             const reporteData = candidates.map((c, idx) => {
-                const totalVotos = conteo[c.id] || 0;
+                const totalVotos = conteo[String(c.id)] || 0;
                 return {
                     'N°': idx + 1,
                     'Año Escolar': c.ano,
@@ -372,7 +391,6 @@
             setTimeout(() => { toast.classList.add('translate-y-20', 'opacity-0'); }, 3000);
         }
 
-        // Inicializar al cargar la página
         document.addEventListener('DOMContentLoaded', initRealtimeDashboard);
     </script>
 </body>
